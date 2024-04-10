@@ -1,0 +1,13 @@
+.seat{
+    width: 15px;
+    height: 20px;
+    background-color: #ccc;
+    border: 1px solid #aaa;
+    margin: 2px;
+    cursor: pointer;
+}
+
+.bold-red {
+    color: red;
+    font-size: 1.2em;
+  }
