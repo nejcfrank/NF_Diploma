@@ -16,6 +16,12 @@ function Seats() {
   const [showCountdown, setShowCountdown] = useState(false);
   const [expirationTime, setExpirationTime] = useState(null);
 
+  useEffect(() => {
+    const storedSelectedSeats =
+      JSON.parse(localStorage.getItem("selectedSeats")) || [];
+    setSelectedSeats(storedSelectedSeats);
+  }, []);
+
   //fetches seat data when the component mounts and sets up a subscription to listen for real-time changes in the seats table
   useEffect(() => {
     fetchSeats(); // Fetch seats when component mounts
@@ -81,7 +87,7 @@ function Seats() {
       if (error) {
         throw error;
       }
-
+      console.log();
       // Check reservation expiration for each seat
       const currentTime = new Date();
       const updatedSeats = data.map((seat) => {
@@ -110,7 +116,7 @@ function Seats() {
     }
   }
 
-  //This function toggles the selection of a seat. It checks if seat selection is allowed, updates the selected seats array, and updates seat availability in the database accordingly.
+  // This function toggles the selection of a seat.
   async function toggleSeatSelection(seatId) {
     if (!seatSelectionAllowed) {
       return;
@@ -127,6 +133,19 @@ function Seats() {
       await updateSeatAvailability(seatId, true); // Make the seat available again
       setMessage("");
       setShowMessage(false);
+      // Remove seatId from local storage
+      const storedSelectedSeats = JSON.parse(
+        localStorage.getItem("selectedSeats")
+      );
+      if (storedSelectedSeats) {
+        const updatedStoredSelectedSeats = storedSelectedSeats.filter(
+          (id) => id !== seatId
+        );
+        localStorage.setItem(
+          "selectedSeats",
+          JSON.stringify(updatedStoredSelectedSeats)
+        );
+      }
     } else {
       if (selectedSeat.is_available) {
         // Update seat availability instantly in the database
@@ -134,10 +153,19 @@ function Seats() {
         setSelectedSeats([...selectedSeats, seatId]);
         setMessage("");
         setShowMessage(false);
+        // Save selected seatId to local storage
+        const storedSelectedSeats =
+          JSON.parse(localStorage.getItem("selectedSeats")) || [];
+        localStorage.setItem(
+          "selectedSeats",
+          JSON.stringify([...storedSelectedSeats, seatId])
+        );
       } else {
+        // Display a message indicating that the seat is unavailable
         setMessage("Seat unavailable");
         setShowMessage(true);
         setShowBlurOverlay(true);
+        // Hide the message after 1 second
         setTimeout(() => {
           setMessage("");
           setShowMessage(false);
@@ -165,6 +193,7 @@ function Seats() {
   }
 
   // This function handles the purchase of selected seats by marking them as unavailable in the database.
+  // This function handles the purchase of selected seats by marking them as unavailable in the database.
   async function handleBuy() {
     try {
       const updatedSeats = seats.map((seat) =>
@@ -172,11 +201,11 @@ function Seats() {
           ? { ...seat, is_available: false }
           : seat
       );
-  
+
       await supabase
         .from("seats")
         .upsert(updatedSeats, { returning: "minimal" });
-  
+
       setSeats((prevSeats) =>
         prevSeats.map((seat) =>
           selectedSeats.includes(seat.id)
@@ -185,9 +214,12 @@ function Seats() {
         )
       );
       setSelectedSeats([]);
-  
+
       setShowCountdown(false); // Reset countdown display
-  
+
+      // Remove selected seats from local storage
+      localStorage.removeItem("selectedSeats");
+
       console.log("Seats successfully bought!");
     } catch (error) {
       console.error("Error buying seats:", error.message);
@@ -197,44 +229,53 @@ function Seats() {
   //This function handles seat reservation, marking selected seats as unavailable for a specific duration.
   async function handleReservation() {
     try {
-      // Get the current time and set the expiration time to 10 seconds from now
-      const reservationExpiresAt = new Date();
-      reservationExpiresAt.setSeconds(reservationExpiresAt.getSeconds() + 10);
+      // Calculate the expiration time for the new reservation or extend the existing expiration time
+      const currentTime = new Date();
+      let newExpirationTime;
+      if (expirationTime && expirationTime > currentTime) {
+        // If there's an existing expiration time, extend it
+        const remainingTime = (expirationTime - currentTime) / 1000;
+        newExpirationTime = new Date(
+          currentTime.getTime() + remainingTime * 1000 + 10 * 1000
+        ); // Add 10 seconds to the remaining time
+      } else {
+        // If no existing expiration time, set a new one
+        newExpirationTime = new Date(currentTime.getTime() + 10 * 1000); // Set expiration time to 10 seconds from now
+      }
 
-      sessionStorage.setItem("expirationTime", reservationExpiresAt.toISOString());
+      sessionStorage.setItem("expirationTime", newExpirationTime.toISOString());
 
-  
       // Fetch the seat data including seat_index
       const { data: seatsData, error: fetchError } = await supabase
         .from("seats")
         .select("*");
-  
+
       // Throw an error if there's an issue fetching the data
       if (fetchError) {
         throw fetchError;
       }
-  
+
       // Prepare the updated seat data based on the selected seats
       const updatedSeats = selectedSeats.map((seatId) => {
         const seat = seatsData.find((seat) => seat.id === seatId);
         return {
           id: seatId,
           is_available: false,
-          reservation_expires_at: reservationExpiresAt.toISOString(),
+          reservation_expires_at: newExpirationTime.toISOString(),
           seat_index: seat.seat_index, // Include the seat_index
         };
       });
-  
+
       // Update the selected seats in the Supabase table
       const { error } = await supabase
         .from("seats")
         .upsert(updatedSeats, { returning: "minimal" });
-  
+
       // Throw an error if there's an issue updating the seats
       if (error) {
         throw error;
       }
-  
+
       // Update the seats in the local state to reflect the reservation
       setSeats((prevSeats) =>
         prevSeats.map((seat) =>
@@ -242,32 +283,27 @@ function Seats() {
             ? {
                 ...seat,
                 is_available: false,
-                reservation_expires_at: reservationExpiresAt.toISOString(),
+                reservation_expires_at: newExpirationTime.toISOString(),
               }
             : seat
         )
       );
-  
-      // Disable seat selection after making the reservation
-      setSeatSelectionAllowed(false);
-  
+
       // Set expiration time state for the countdown
-      setExpirationTime(reservationExpiresAt);
-  
+      setExpirationTime(newExpirationTime);
+
       // Show the countdown
       setShowCountdown(true);
-  
+
       // Set a timer to revert the reservation if the ticket is not bought
       setTimeout(
         () => handleReservationTimeout(updatedSeats.map((seat) => seat.id)),
-        10000
+        newExpirationTime - currentTime + 1000
       );
     } catch (error) {
       console.error("Error updating seat availability:", error.message);
     }
   }
-  
-  
 
   // This function is triggered periodically to check the reservation expiration
   async function checkReservationExpiration() {
@@ -297,11 +333,11 @@ function Seats() {
         }
         return seat;
       });
-  
+
       await supabase
         .from("seats")
         .upsert(updatedSeats, { returning: "minimal" });
-  
+
       setSeats(updatedSeats);
       setSeatSelectionAllowed(true); // Enable seat selection again
       setSelectedSeats([]); // Reset selected seats
@@ -322,12 +358,14 @@ function Seats() {
   useEffect(() => {
     // Check if there are any reserved seats
     const hasReservedSeats = seats.some(
-      (seat) => seat.reservation_expires_at && new Date(seat.reservation_expires_at) > new Date()
+      (seat) =>
+        seat.reservation_expires_at &&
+        new Date(seat.reservation_expires_at) > new Date()
     );
-  
+
     // Check if there is an expiration time stored in sessionStorage
     const storedExpirationTime = sessionStorage.getItem("expirationTime");
-  
+
     if (hasReservedSeats && storedExpirationTime) {
       // If there are reserved seats and an expiration time stored, parse it and set it as the expiration time
       const expirationTime = new Date(storedExpirationTime);
@@ -335,7 +373,7 @@ function Seats() {
       setShowCountdown(true); // Show the countdown
     }
   }, [seats]); // Dependency on seats to trigger the effect when seat data changes
-  
+
   const handleExpiration = () => {
     setExpirationTime(null);
     setShowCountdown(false);
@@ -354,12 +392,15 @@ function Seats() {
       {message && <p>{message}</p>}
 
       {/* New UI component to display countdown message */}
+
       {showCountdown && (
         <div className="countdown-container">
-          {expirationTime && <Countdown
-        expirationTime={expirationTime}
-        onExpiration={handleExpiration}
-      />}
+          {expirationTime && (
+            <Countdown
+              expirationTime={expirationTime}
+              onExpiration={handleExpiration}
+            />
+          )}
         </div>
       )}
 

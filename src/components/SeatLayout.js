@@ -102,6 +102,7 @@ function SeatLayout({ seats, selectedSeats, toggleSeatSelection }) {
           selectedSeats={selectedSeats}
           toggleSeatSelection={toggleSeatSelection}
         />
+        
       </div>
     </div>
   );

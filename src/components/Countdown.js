@@ -41,6 +41,15 @@ function Countdown({ expirationTime, onExpiration }) {
     }
   }, [expirationTime, onExpiration]);
 
+  useEffect(() => {
+    // When expirationTime changes, reset the countdown
+    const storedExpirationTime = sessionStorage.getItem("expirationTime");
+    if (storedExpirationTime) {
+      const seconds = calculateSecondsLeft(storedExpirationTime);
+      setSecondsLeft(seconds);
+    }
+  }, [expirationTime]);
+
   if (!expirationTime || secondsLeft === 0) {
     // Render nothing when expiration time is null or when countdown reaches 0
     return null;
@@ -57,3 +66,4 @@ function Countdown({ expirationTime, onExpiration }) {
 }
 
 export default Countdown;
+
